@@ -12,5 +12,5 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copia o código do microserviço.
 COPY app/ ./app/
 
-# Executa o Python sem bufferizar a saída, permitindo acompanhar os logs do microserviço normalmente pelo Docker, apenas com CMD ["python", "app/main.py"] não estava retornando os logs corretamente.
-CMD ["python", "-u", "app/main.py"]
+# Executa o microserviço como módulo para preservar os imports do pacote app.
+CMD ["python", "-u", "-m", "app.main"]
