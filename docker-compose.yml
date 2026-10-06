@@ -25,6 +25,17 @@ services:
     depends_on:
       - broker
 
+    # Microserviço responsável pelo cadastro de condutores e propriedade.
+  condutores:
+    build:
+      context: ./condutores
+
+    container_name: detran-mqtt-condutores
+
+    # O microserviço precisa do broker para se comunicar via MQTT.
+    depends_on:
+      - broker
+      
 volumes:
   # Volumes utilizados para persistir dados e logs do broker.
   mosquitto_data:

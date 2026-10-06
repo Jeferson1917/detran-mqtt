@@ -1,5 +1,7 @@
 import json
+
 import paho.mqtt.client as mqtt
+
 from app.domain.veiculo import Veiculo
 from app.repository import VeiculoRepository
 
@@ -17,6 +19,11 @@ TOPICO_RESPOSTA_CALCULAR_IPVA = (
     "detran/responses/emplacamento/calcular-ipva"
 )
 
+TOPICO_CONSULTAR_PLACA = "detran/requests/emplacamento/consultar-placa"
+TOPICO_RESPOSTA_CONSULTAR_PLACA = (
+    "detran/responses/emplacamento/consultar-placa"
+)
+
 
 repository = VeiculoRepository()
 
@@ -29,10 +36,12 @@ def on_connect(client, userdata, flags, reason_code, properties):
     client.subscribe(TOPICO_EMPLACAR)
     client.subscribe(TOPICO_VEICULOS_POR_ANO)
     client.subscribe(TOPICO_CALCULAR_IPVA)
+    client.subscribe(TOPICO_CONSULTAR_PLACA)
 
     print(f"Inscrito no tópico: {TOPICO_EMPLACAR}")
     print(f"Inscrito no tópico: {TOPICO_VEICULOS_POR_ANO}")
     print(f"Inscrito no tópico: {TOPICO_CALCULAR_IPVA}")
+    print(f"Inscrito no tópico: {TOPICO_CONSULTAR_PLACA}")
 
 
 def consultar_veiculos_por_ano(client, dados):
@@ -97,6 +106,38 @@ def calcular_ipva(client, dados):
     )
 
 
+def consultar_placa(client, dados):
+    # Consulta um veículo que pertence ao microserviço de emplacamento.
+    veiculo = repository.buscar_por_placa(dados["placa"])
+
+    if veiculo is None:
+        resposta = {
+            "requestId": dados.get("requestId"),
+            "sucesso": False,
+            "mensagem": "Veículo não encontrado.",
+            "placa": dados["placa"],
+        }
+    else:
+        resposta = {
+            "requestId": dados.get("requestId"),
+            "sucesso": True,
+            "placa": veiculo.placa,
+            "modelo": veiculo.modelo,
+            "valor": veiculo.valor,
+            "cpf_condutor": veiculo.cpf_condutor,
+        }
+
+    client.publish(
+        TOPICO_RESPOSTA_CONSULTAR_PLACA,
+        json.dumps(resposta),
+    )
+
+    print(
+        f"Resposta publicada em: "
+        f"{TOPICO_RESPOSTA_CONSULTAR_PLACA}"
+    )
+
+
 # Executado sempre que uma mensagem chega em um tópico inscrito.
 def on_message(client, userdata, message):
     print(f"Mensagem recebida em: {message.topic}")
@@ -106,6 +147,10 @@ def on_message(client, userdata, message):
         dados = json.loads(message.payload.decode("utf-8"))
 
         print(f"Solicitação recebida: {dados}")
+
+        if message.topic == TOPICO_CONSULTAR_PLACA:
+            consultar_placa(client, dados)
+            return
 
         if message.topic == TOPICO_CALCULAR_IPVA:
             calcular_ipva(client, dados)
