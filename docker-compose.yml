@@ -35,7 +35,18 @@ services:
     # O microserviço precisa do broker para se comunicar via MQTT.
     depends_on:
       - broker
-      
+    
+  # Microserviço responsável pelo lançamento e consulta de multas.
+  multas:
+    build:
+      context: ./multas
+
+    container_name: detran-mqtt-multas
+
+    # O microserviço precisa do broker para se comunicar via MQTT.
+    depends_on:
+      - broker
+
 volumes:
   # Volumes utilizados para persistir dados e logs do broker.
   mosquitto_data:

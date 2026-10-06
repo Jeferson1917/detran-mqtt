@@ -1,0 +1,170 @@
+import json
+
+import paho.mqtt.client as mqtt
+
+from app.domain.multa import Multa
+from app.repository import MultaRepository
+
+
+TOPICO_LANCAR = "detran/requests/multas/lancar"
+TOPICO_RESPOSTA_LANCAR = "detran/responses/multas/lancar"
+
+TOPICO_VEICULO = "detran/requests/multas/veiculo"
+TOPICO_RESPOSTA_VEICULO = "detran/responses/multas/veiculo"
+
+TOPICO_ANO = "detran/requests/multas/ano"
+TOPICO_RESPOSTA_ANO = "detran/responses/multas/ano"
+
+
+repository = MultaRepository()
+
+
+# Executado quando o microserviço consegue estabelecer conexão com o broker.
+def on_connect(client, userdata, flags, reason_code, properties):
+    print(f"Conectado ao broker MQTT. Código: {reason_code}")
+
+    # O microserviço se inscreve nas operações que oferece.
+    client.subscribe(TOPICO_LANCAR)
+    client.subscribe(TOPICO_VEICULO)
+    client.subscribe(TOPICO_ANO)
+
+    print(f"Inscrito no tópico: {TOPICO_LANCAR}")
+    print(f"Inscrito no tópico: {TOPICO_VEICULO}")
+    print(f"Inscrito no tópico: {TOPICO_ANO}")
+
+
+def lancar_multa(client, dados):
+    multa = Multa(
+        ano=int(dados["ano"]),
+        descricao=dados["descricao"],
+        pontuacao=int(dados["pontuacao"]),
+        placa=dados["placa"],
+    )
+
+    # Salva a multa no armazenamento do microserviço.
+    repository.salvar(multa)
+
+    resposta = {
+        "requestId": dados.get("requestId"),
+        "sucesso": True,
+        "mensagem": "Multa lançada com sucesso.",
+        "placa": multa.placa,
+        "ano": multa.ano,
+        "pontuacao": multa.pontuacao,
+    }
+
+    client.publish(
+        TOPICO_RESPOSTA_LANCAR,
+        json.dumps(resposta),
+    )
+
+    print(
+        f"Resposta publicada em: "
+        f"{TOPICO_RESPOSTA_LANCAR}"
+    )
+
+
+def consultar_multas_veiculo(client, dados):
+    multas = repository.buscar_por_placa_e_ano(
+        placa=dados["placa"],
+        ano=int(dados["ano"]),
+    )
+
+    resposta = {
+        "requestId": dados.get("requestId"),
+        "sucesso": True,
+        "placa": dados["placa"],
+        "ano": int(dados["ano"]),
+        "multas": [
+            {
+                "descricao": multa.descricao,
+                "pontuacao": multa.pontuacao,
+            }
+            for multa in multas
+        ],
+    }
+
+    client.publish(
+        TOPICO_RESPOSTA_VEICULO,
+        json.dumps(resposta),
+    )
+
+    print(
+        f"Resposta publicada em: "
+        f"{TOPICO_RESPOSTA_VEICULO}"
+    )
+
+
+def consultar_multas_ano(client, dados):
+    multas = repository.buscar_por_ano(
+        ano=int(dados["ano"]),
+    )
+
+    resposta = {
+        "requestId": dados.get("requestId"),
+        "sucesso": True,
+        "ano": int(dados["ano"]),
+        "multas": [
+            {
+                "placa": multa.placa,
+                "descricao": multa.descricao,
+                "pontuacao": multa.pontuacao,
+            }
+            for multa in multas
+        ],
+    }
+
+    client.publish(
+        TOPICO_RESPOSTA_ANO,
+        json.dumps(resposta),
+    )
+
+    print(
+        f"Resposta publicada em: "
+        f"{TOPICO_RESPOSTA_ANO}"
+    )
+
+
+# Executado quando uma mensagem chega em um tópico inscrito.
+def on_message(client, userdata, message):
+    print(f"Mensagem recebida em: {message.topic}")
+
+    try:
+        # MQTT entrega o payload como bytes, então transformamos em JSON.
+        dados = json.loads(message.payload.decode("utf-8"))
+
+        print(f"Solicitação recebida: {dados}")
+
+        if message.topic == TOPICO_LANCAR:
+            lancar_multa(client, dados)
+            return
+
+        if message.topic == TOPICO_VEICULO:
+            consultar_multas_veiculo(client, dados)
+            return
+
+        if message.topic == TOPICO_ANO:
+            consultar_multas_ano(client, dados)
+            return
+
+    except (
+        json.JSONDecodeError,
+        UnicodeDecodeError,
+        KeyError,
+        ValueError,
+    ) as erro:
+        print(f"Erro ao processar mensagem: {erro}")
+
+
+# Cria o cliente MQTT utilizado pelo microserviço.
+client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+
+# Define os callbacks responsáveis pela comunicação MQTT.
+client.on_connect = on_connect
+client.on_message = on_message
+
+# Dentro da rede Docker Compose, "broker" é o nome do serviço Mosquitto.
+client.connect("broker", 1883, 60)
+
+# Mantém o microserviço executando e processando mensagens.
+client.loop_forever()
