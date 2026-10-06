@@ -1,21 +1,31 @@
 services:
-  # Broker responsável por receber e distribuir as mensagens MQTT
+  # Broker responsável por receber e distribuir as mensagens MQTT.
   broker:
     image: eclipse-mosquitto:2
     container_name: detran-mqtt-broker
 
-    # Expõe a porta MQTT do container para a máquina host
+    # Expõe a porta MQTT para a máquina host.
     ports:
       - "1883:1883"
 
-    # Monta a configuração do Mosquitto e mantém os dados
-    # persistentes através de volumes Docker
+    # Monta a configuração do Mosquitto e mantém seus dados persistentes.
     volumes:
       - ./broker/mosquitto/config/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
       - mosquitto_data:/mosquitto/data
       - mosquitto_log:/mosquitto/log
 
+  # Microserviço responsável pelas operações de emplacamento e IPVA.
+  emplacamento:
+    build:
+      context: ./emplacamento
+
+    container_name: detran-mqtt-emplacamento
+
+    # O microserviço precisa do broker para conseguir se comunicar.
+    depends_on:
+      - broker
+
 volumes:
-  # Volumes para persistir dados e logs do broker
+  # Volumes utilizados para persistir dados e logs do broker.
   mosquitto_data:
   mosquitto_log:
