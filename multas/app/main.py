@@ -111,7 +111,6 @@ def consultar_multas_veiculo(client, dados):
 
 def processar_resposta_veiculo(client, dados):
     request_id = dados.get("requestId")
-
     consulta = consultas_pendentes.get(request_id)
 
     if not consulta:
@@ -123,17 +122,14 @@ def processar_resposta_veiculo(client, dados):
             "sucesso": False,
             "mensagem": "Veículo não encontrado.",
         }
-
         client.publish(
             TOPICO_RESPOSTA_VEICULO,
             json.dumps(resposta),
         )
-
         consultas_pendentes.pop(request_id, None)
         return
 
-    cpf = dados["veiculo"]["cpf_condutor"]
-
+    cpf = dados["cpf_condutor"]
     consulta["cpf"] = cpf
 
     client.publish(
@@ -147,7 +143,6 @@ def processar_resposta_veiculo(client, dados):
 
 def processar_resposta_condutor(client, dados):
     request_id = dados.get("requestId")
-
     consulta = consultas_pendentes.get(request_id)
 
     if not consulta:
@@ -159,12 +154,10 @@ def processar_resposta_condutor(client, dados):
             "sucesso": False,
             "mensagem": "Condutor não encontrado.",
         }
-
         client.publish(
             TOPICO_RESPOSTA_VEICULO,
             json.dumps(resposta),
         )
-
         consultas_pendentes.pop(request_id, None)
         return
 
@@ -175,8 +168,8 @@ def processar_resposta_condutor(client, dados):
             "placa": consulta["placa"],
         },
         "condutor": {
-            "cpf": dados["condutor"]["cpf"],
-            "nome": dados["condutor"]["nome"],
+            "cpf": dados["cpf"],
+            "nome": dados["nome"],
         },
         "ano": consulta["ano"],
         "multas": [
@@ -192,7 +185,6 @@ def processar_resposta_condutor(client, dados):
         TOPICO_RESPOSTA_VEICULO,
         json.dumps(resposta),
     )
-
     consultas_pendentes.pop(request_id, None)
 
 
@@ -289,7 +281,6 @@ def processar_resposta_veiculos_por_cpf(client, dados):
         }),
     )
 
-
 def processar_resposta_condutor_consulta(client, dados):
     request_id = dados.get("requestId")
 
@@ -304,12 +295,10 @@ def processar_resposta_condutor_consulta(client, dados):
             "sucesso": False,
             "mensagem": "Condutor não encontrado.",
         }
-
         client.publish(
             TOPICO_RESPOSTA_CONDUTOR,
             json.dumps(resposta),
         )
-
         consultas_pendentes.pop(request_id, None)
         return
 
@@ -317,8 +306,8 @@ def processar_resposta_condutor_consulta(client, dados):
         "requestId": request_id,
         "sucesso": True,
         "condutor": {
-            "cpf": dados["condutor"]["cpf"],
-            "nome": dados["condutor"]["nome"],
+            "cpf": dados["cpf"],
+            "nome": dados["nome"],
         },
         "ano": consulta["ano"],
         "multas": consulta["multas"],
@@ -330,7 +319,6 @@ def processar_resposta_condutor_consulta(client, dados):
     )
 
     consultas_pendentes.pop(request_id, None)
-
 
 def consultar_ranking(client, dados):
     request_id = dados.get("requestId")
