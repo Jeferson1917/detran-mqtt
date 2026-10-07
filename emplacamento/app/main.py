@@ -9,19 +9,33 @@ from app.repository import VeiculoRepository
 TOPICO_EMPLACAR = "detran/requests/emplacamento/emplacar"
 TOPICO_RESPOSTA = "detran/responses/emplacamento/emplacar"
 
-TOPICO_VEICULOS_POR_ANO = "detran/requests/emplacamento/veiculos-por-ano"
+TOPICO_VEICULOS_POR_ANO = (
+    "detran/requests/emplacamento/veiculos-por-ano"
+)
 TOPICO_RESPOSTA_VEICULOS_POR_ANO = (
     "detran/responses/emplacamento/veiculos-por-ano"
 )
 
-TOPICO_CALCULAR_IPVA = "detran/requests/emplacamento/calcular-ipva"
+TOPICO_CALCULAR_IPVA = (
+    "detran/requests/emplacamento/calcular-ipva"
+)
 TOPICO_RESPOSTA_CALCULAR_IPVA = (
     "detran/responses/emplacamento/calcular-ipva"
 )
 
-TOPICO_CONSULTAR_PLACA = "detran/requests/emplacamento/consultar-placa"
+TOPICO_CONSULTAR_PLACA = (
+    "detran/requests/emplacamento/consultar-placa"
+)
 TOPICO_RESPOSTA_CONSULTAR_PLACA = (
     "detran/responses/emplacamento/consultar-placa"
+)
+
+# Tópicos usados para consultar os veículos associados a um CPF.
+TOPICO_VEICULOS_POR_CPF = (
+    "detran/requests/emplacamento/veiculos-por-cpf"
+)
+TOPICO_RESPOSTA_VEICULOS_POR_CPF = (
+    "detran/responses/emplacamento/veiculos-por-cpf"
 )
 
 
@@ -37,11 +51,13 @@ def on_connect(client, userdata, flags, reason_code, properties):
     client.subscribe(TOPICO_VEICULOS_POR_ANO)
     client.subscribe(TOPICO_CALCULAR_IPVA)
     client.subscribe(TOPICO_CONSULTAR_PLACA)
+    client.subscribe(TOPICO_VEICULOS_POR_CPF)
 
     print(f"Inscrito no tópico: {TOPICO_EMPLACAR}")
     print(f"Inscrito no tópico: {TOPICO_VEICULOS_POR_ANO}")
     print(f"Inscrito no tópico: {TOPICO_CALCULAR_IPVA}")
     print(f"Inscrito no tópico: {TOPICO_CONSULTAR_PLACA}")
+    print(f"Inscrito no tópico: {TOPICO_VEICULOS_POR_CPF}")
 
 
 def consultar_veiculos_por_ano(client, dados):
@@ -72,6 +88,34 @@ def consultar_veiculos_por_ano(client, dados):
     print(
         f"Resposta publicada em: "
         f"{TOPICO_RESPOSTA_VEICULOS_POR_ANO}"
+    )
+
+
+def consultar_veiculos_por_cpf(client, dados):
+    # Busca no repository os veículos associados ao CPF informado.
+    veiculos = repository.buscar_por_cpf(dados["cpf"])
+
+    resposta = {
+        "requestId": dados.get("requestId"),
+        "sucesso": True,
+        "cpf": dados["cpf"],
+        "veiculos": [
+            {
+                "placa": veiculo.placa,
+                "modelo": veiculo.modelo,
+            }
+            for veiculo in veiculos
+        ],
+    }
+
+    client.publish(
+        TOPICO_RESPOSTA_VEICULOS_POR_CPF,
+        json.dumps(resposta),
+    )
+
+    print(
+        f"Resposta publicada em: "
+        f"{TOPICO_RESPOSTA_VEICULOS_POR_CPF}"
     )
 
 
@@ -143,14 +187,21 @@ def on_message(client, userdata, message):
     print(f"Mensagem recebida em: {message.topic}")
 
     try:
-        # MQTT entrega o payload como bytes, então transformamos em JSON.
-        dados = json.loads(message.payload.decode("utf-8"))
+        # MQTT entrega o payload como bytes, então transformamos em texto.
+        payload = message.payload.decode("utf-8-sig")
+
+        dados = json.loads(payload)
 
         print(f"Solicitação recebida: {dados}")
 
         if message.topic == TOPICO_CONSULTAR_PLACA:
             consultar_placa(client, dados)
             return
+
+        if message.topic == TOPICO_VEICULOS_POR_CPF:
+            consultar_veiculos_por_cpf(client, dados)
+            return
+
 
         if message.topic == TOPICO_CALCULAR_IPVA:
             calcular_ipva(client, dados)
@@ -160,32 +211,36 @@ def on_message(client, userdata, message):
             consultar_veiculos_por_ano(client, dados)
             return
 
-        veiculo = Veiculo(
-            placa=dados["placa"],
-            modelo=dados["modelo"],
-            valor=float(dados["valor"]),
-            cpf_condutor=dados["cpf"],
-            ano_emplacamento=dados["ano_emplacamento"],
-        )
+        if message.topic == TOPICO_EMPLACAR:
+            veiculo = Veiculo(
+                placa=dados["placa"],
+                modelo=dados["modelo"],
+                valor=float(dados["valor"]),
+                cpf_condutor=dados["cpf"],
+                ano_emplacamento=dados["ano_emplacamento"],
+            )
 
-        # Salva o veículo no armazenamento do microserviço.
-        repository.salvar(veiculo)
+            # Salva o veículo no armazenamento do microserviço.
+            repository.salvar(veiculo)
 
-        resposta = {
-            "requestId": dados.get("requestId"),
-            "sucesso": True,
-            "mensagem": "Veículo emplacado com sucesso.",
-            "placa": veiculo.placa,
-        }
+            resposta = {
+                "requestId": dados.get("requestId"),
+                "sucesso": True,
+                "mensagem": "Veículo emplacado com sucesso.",
+                "placa": veiculo.placa,
+            }
 
-        payload_resposta = json.dumps(resposta)
+            payload_resposta = json.dumps(resposta)
 
-        client.publish(
-            TOPICO_RESPOSTA,
-            payload_resposta,
-        )
+            client.publish(
+                TOPICO_RESPOSTA,
+                payload_resposta,
+            )
 
-        print(f"Resposta publicada em: {TOPICO_RESPOSTA}")
+            print(
+                f"Resposta publicada em: "
+                f"{TOPICO_RESPOSTA}"
+            )
 
     except (
         json.JSONDecodeError,
