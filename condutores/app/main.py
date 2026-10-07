@@ -1,7 +1,5 @@
 import json
-
 import paho.mqtt.client as mqtt
-
 from app.domain.condutor import Condutor
 from app.repository import CondutorRepository
 
@@ -12,7 +10,14 @@ TOPICO_RESPOSTA_CADASTRAR = "detran/responses/condutores/cadastrar"
 TOPICO_TRANSFERIR = "detran/requests/condutores/transferir"
 TOPICO_RESPOSTA_TRANSFERIR = "detran/responses/condutores/transferir"
 
-# Tópicos usados para consultar a existência do veículo no microserviço de emplacamento.
+# Tópicos usados para consultar um condutor pelo CPF.
+TOPICO_CONSULTAR_CPF = "detran/requests/condutores/consultar-cpf"
+TOPICO_RESPOSTA_CONSULTAR_CPF = (
+    "detran/responses/condutores/consultar-cpf"
+)
+
+# Tópicos usados para consultar a existência do veículo
+# no microserviço de emplacamento.
 TOPICO_CONSULTAR_PLACA = "detran/requests/emplacamento/consultar-placa"
 TOPICO_RESPOSTA_CONSULTAR_PLACA = (
     "detran/responses/emplacamento/consultar-placa"
@@ -21,7 +26,8 @@ TOPICO_RESPOSTA_CONSULTAR_PLACA = (
 
 repository = CondutorRepository()
 
-# Guarda transferências que aguardam a resposta do microserviço de emplacamento.
+# Guarda transferências que aguardam a resposta
+# do microserviço de emplacamento.
 transferencias_pendentes = {}
 
 
@@ -32,12 +38,14 @@ def on_connect(client, userdata, flags, reason_code, properties):
     # O microserviço se inscreve nas operações que oferece.
     client.subscribe(TOPICO_CADASTRAR)
     client.subscribe(TOPICO_TRANSFERIR)
+    client.subscribe(TOPICO_CONSULTAR_CPF)
 
     # Recebe as respostas das consultas feitas ao microserviço de emplacamento.
     client.subscribe(TOPICO_RESPOSTA_CONSULTAR_PLACA)
 
     print(f"Inscrito no tópico: {TOPICO_CADASTRAR}")
     print(f"Inscrito no tópico: {TOPICO_TRANSFERIR}")
+    print(f"Inscrito no tópico: {TOPICO_CONSULTAR_CPF}")
     print(f"Inscrito no tópico: {TOPICO_RESPOSTA_CONSULTAR_PLACA}")
 
 
@@ -65,6 +73,37 @@ def cadastrar_condutor(client, dados):
     print(
         f"Resposta publicada em: "
         f"{TOPICO_RESPOSTA_CADASTRAR}"
+    )
+
+
+def consultar_cpf(client, dados):
+    # A consulta utiliza o repository que pertence
+    # ao microserviço de condutores.
+    condutor = repository.buscar_por_cpf(dados["cpf"])
+
+    if condutor is None:
+        resposta = {
+            "requestId": dados.get("requestId"),
+            "sucesso": False,
+            "mensagem": "Condutor não encontrado.",
+            "cpf": dados["cpf"],
+        }
+    else:
+        resposta = {
+            "requestId": dados.get("requestId"),
+            "sucesso": True,
+            "cpf": condutor.cpf,
+            "nome": condutor.nome,
+        }
+
+    client.publish(
+        TOPICO_RESPOSTA_CONSULTAR_CPF,
+        json.dumps(resposta),
+    )
+
+    print(
+        f"Resposta publicada em: "
+        f"{TOPICO_RESPOSTA_CONSULTAR_CPF}"
     )
 
 
@@ -168,6 +207,10 @@ def on_message(client, userdata, message):
 
         if message.topic == TOPICO_TRANSFERIR:
             transferir_proprietario(client, dados)
+            return
+
+        if message.topic == TOPICO_CONSULTAR_CPF:
+            consultar_cpf(client, dados)
             return
 
         if message.topic == TOPICO_RESPOSTA_CONSULTAR_PLACA:
