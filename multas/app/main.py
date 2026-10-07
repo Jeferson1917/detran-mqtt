@@ -1,5 +1,7 @@
 import json
+
 import paho.mqtt.client as mqtt
+
 from app.domain.multa import Multa
 from app.repository import MultaRepository
 
@@ -16,7 +18,10 @@ TOPICO_RESPOSTA_ANO = "detran/responses/multas/ano"
 
 # Tópicos usados para consultar os dados do veículo no microserviço
 # de emplacamento.
-TOPICO_CONSULTAR_PLACA = "detran/requests/emplacamento/consultar-placa"
+TOPICO_CONSULTAR_PLACA = (
+    "detran/requests/emplacamento/consultar-placa"
+)
+
 TOPICO_RESPOSTA_CONSULTAR_PLACA = (
     "detran/responses/emplacamento/consultar-placa"
 )
@@ -24,9 +29,33 @@ TOPICO_RESPOSTA_CONSULTAR_PLACA = (
 
 # Tópicos usados para consultar os dados do condutor no microserviço
 # de condutores.
-TOPICO_CONSULTAR_CPF = "detran/requests/condutores/consultar-cpf"
+TOPICO_CONSULTAR_CPF = (
+    "detran/requests/condutores/consultar-cpf"
+)
+
 TOPICO_RESPOSTA_CONSULTAR_CPF = (
     "detran/responses/condutores/consultar-cpf"
+)
+
+
+# Tópicos usados para consultar as multas de um condutor em determinado ano.
+TOPICO_CONDUTOR = (
+    "detran/requests/multas/condutor"
+)
+
+TOPICO_RESPOSTA_CONDUTOR = (
+    "detran/responses/multas/condutor"
+)
+
+
+# Tópicos usados para descobrir os veículos associados a um CPF.
+# Essa consulta é realizada pelo microserviço de emplacamento.
+TOPICO_VEICULOS_POR_CPF = (
+    "detran/requests/emplacamento/veiculos-por-cpf"
+)
+
+TOPICO_RESPOSTA_VEICULOS_POR_CPF = (
+    "detran/responses/emplacamento/veiculos-por-cpf"
 )
 
 
@@ -42,21 +71,25 @@ consultas_pendentes = {}
 def on_connect(client, userdata, flags, reason_code, properties):
     print(f"Conectado ao broker MQTT. Código: {reason_code}")
 
-    # O microserviço se inscreve nas operações que oferece.
+    # Operações oferecidas diretamente pelo microserviço de multas.
     client.subscribe(TOPICO_LANCAR)
     client.subscribe(TOPICO_VEICULO)
     client.subscribe(TOPICO_ANO)
+    client.subscribe(TOPICO_CONDUTOR)
 
-    # Recebe respostas do microserviço de emplacamento.
+    # Respostas recebidas do microserviço de emplacamento.
     client.subscribe(TOPICO_RESPOSTA_CONSULTAR_PLACA)
+    client.subscribe(TOPICO_RESPOSTA_VEICULOS_POR_CPF)
 
-    # Recebe respostas do microserviço de condutores.
+    # Respostas recebidas do microserviço de condutores.
     client.subscribe(TOPICO_RESPOSTA_CONSULTAR_CPF)
 
     print(f"Inscrito no tópico: {TOPICO_LANCAR}")
     print(f"Inscrito no tópico: {TOPICO_VEICULO}")
     print(f"Inscrito no tópico: {TOPICO_ANO}")
+    print(f"Inscrito no tópico: {TOPICO_CONDUTOR}")
     print(f"Inscrito no tópico: {TOPICO_RESPOSTA_CONSULTAR_PLACA}")
+    print(f"Inscrito no tópico: {TOPICO_RESPOSTA_VEICULOS_POR_CPF}")
     print(f"Inscrito no tópico: {TOPICO_RESPOSTA_CONSULTAR_CPF}")
 
 
@@ -68,7 +101,7 @@ def lancar_multa(client, dados):
         placa=dados["placa"],
     )
 
-    # Salva a multa no armazenamento do microserviço.
+    # Salva a multa no armazenamento pertencente ao microserviço.
     repository.salvar(multa)
 
     resposta = {
@@ -99,9 +132,12 @@ def consultar_multas_veiculo(client, dados):
         ano=int(dados["ano"]),
     )
 
-    # Guarda os dados da consulta enquanto esperamos
+    # Guarda o estado da consulta enquanto esperamos
     # as respostas dos outros microserviços.
+    #
+    # O tipo identifica qual fluxo originou a consulta.
     consultas_pendentes[request_id] = {
+        "tipo": "veiculo",
         "placa": dados["placa"],
         "ano": int(dados["ano"]),
         "multas": multas,
@@ -131,7 +167,9 @@ def processar_resposta_veiculo(client, dados):
     consulta = consultas_pendentes.get(request_id)
 
     if consulta is None:
-        print(f"Consulta pendente não encontrada: {request_id}")
+        print(
+            f"Consulta pendente não encontrada: {request_id}"
+        )
         return
 
     if not dados.get("sucesso"):
@@ -150,7 +188,6 @@ def processar_resposta_veiculo(client, dados):
         )
 
         del consultas_pendentes[request_id]
-
         return
 
     cpf_condutor = dados["cpf_condutor"]
@@ -179,7 +216,9 @@ def processar_resposta_condutor(client, dados):
     consulta = consultas_pendentes.get(request_id)
 
     if consulta is None:
-        print(f"Consulta pendente não encontrada: {request_id}")
+        print(
+            f"Consulta pendente não encontrada: {request_id}"
+        )
         return
 
     if not dados.get("sucesso"):
@@ -198,7 +237,6 @@ def processar_resposta_condutor(client, dados):
         )
 
         del consultas_pendentes[request_id]
-
         return
 
     resposta = {
@@ -263,13 +301,173 @@ def consultar_multas_ano(client, dados):
     )
 
 
+def consultar_multas_condutor(client, dados):
+    request_id = dados.get("requestId")
+
+    # Guarda o estado da consulta enquanto aguardamos
+    # a resposta do microserviço de emplacamento.
+    #
+    # O tipo identifica que esta consulta começou
+    # pelo CPF do condutor.
+    consultas_pendentes[request_id] = {
+        "tipo": "condutor",
+        "cpf": dados["cpf"],
+        "ano": int(dados["ano"]),
+        "multas": [],
+    }
+
+    consulta = {
+        "requestId": request_id,
+        "cpf": dados["cpf"],
+    }
+
+    # O microserviço de multas não acessa diretamente
+    # o repository de emplacamento.
+    client.publish(
+        TOPICO_VEICULOS_POR_CPF,
+        json.dumps(consulta),
+    )
+
+    print(
+        f"Consulta de veículos por CPF publicada em: "
+        f"{TOPICO_VEICULOS_POR_CPF}"
+    )
+
+
+def processar_resposta_veiculos_por_cpf(client, dados):
+    request_id = dados.get("requestId")
+
+    consulta = consultas_pendentes.get(request_id)
+
+    if consulta is None:
+        print(
+            f"Consulta pendente não encontrada: {request_id}"
+        )
+        return
+
+    if not dados.get("sucesso"):
+        resposta = {
+            "requestId": request_id,
+            "sucesso": False,
+            "mensagem": (
+                "Não foi possível consultar os veículos do condutor."
+            ),
+            "cpf": consulta["cpf"],
+            "ano": consulta["ano"],
+            "multas": [],
+        }
+
+        client.publish(
+            TOPICO_RESPOSTA_CONDUTOR,
+            json.dumps(resposta),
+        )
+
+        del consultas_pendentes[request_id]
+        return
+
+    # O emplacamento informa quais placas estão associadas ao CPF.
+    # A partir daqui, multas consulta apenas os seus próprios dados.
+    for veiculo in dados["veiculos"]:
+        placa = veiculo["placa"]
+
+        multas = repository.buscar_por_placa_e_ano(
+            placa=placa,
+            ano=consulta["ano"],
+        )
+
+        consulta["multas"].extend(
+            [
+                {
+                    "placa": multa.placa,
+                    "descricao": multa.descricao,
+                    "pontuacao": multa.pontuacao,
+                }
+                for multa in multas
+            ]
+        )
+
+    # Depois de reunir as multas, consultamos o nome do condutor.
+    consulta_cpf = {
+        "requestId": request_id,
+        "cpf": consulta["cpf"],
+    }
+
+    client.publish(
+        TOPICO_CONSULTAR_CPF,
+        json.dumps(consulta_cpf),
+    )
+
+    print(
+        f"Consulta de CPF publicada em: "
+        f"{TOPICO_CONSULTAR_CPF}"
+    )
+
+
+def processar_resposta_condutor_consulta(client, dados):
+    request_id = dados.get("requestId")
+
+    consulta = consultas_pendentes.get(request_id)
+
+    if consulta is None:
+        print(
+            f"Consulta pendente não encontrada: {request_id}"
+        )
+        return
+
+    if not dados.get("sucesso"):
+        resposta = {
+            "requestId": request_id,
+            "sucesso": False,
+            "mensagem": "Condutor não encontrado.",
+            "cpf": consulta["cpf"],
+            "ano": consulta["ano"],
+            "multas": consulta["multas"],
+        }
+
+        client.publish(
+            TOPICO_RESPOSTA_CONDUTOR,
+            json.dumps(resposta),
+        )
+
+        del consultas_pendentes[request_id]
+        return
+
+    resposta = {
+        "requestId": request_id,
+        "sucesso": True,
+        "condutor": {
+            "cpf": dados["cpf"],
+            "nome": dados["nome"],
+        },
+        "ano": consulta["ano"],
+        "multas": consulta["multas"],
+    }
+
+    client.publish(
+        TOPICO_RESPOSTA_CONDUTOR,
+        json.dumps(resposta),
+    )
+
+    del consultas_pendentes[request_id]
+
+    print(
+        f"Resposta publicada em: "
+        f"{TOPICO_RESPOSTA_CONDUTOR}"
+    )
+
+
 # Executado quando uma mensagem chega em um tópico inscrito.
 def on_message(client, userdata, message):
     print(f"Mensagem recebida em: {message.topic}")
 
     try:
         # MQTT entrega o payload como bytes, então transformamos em JSON.
-        dados = json.loads(message.payload.decode("utf-8"))
+        #
+        # utf-8-sig também permite lidar com JSONs que eventualmente
+        # tenham sido gerados com BOM.
+        dados = json.loads(
+            message.payload.decode("utf-8-sig")
+        )
 
         print(f"Solicitação recebida: {dados}")
 
@@ -285,13 +483,42 @@ def on_message(client, userdata, message):
             consultar_multas_ano(client, dados)
             return
 
+        if message.topic == TOPICO_CONDUTOR:
+            consultar_multas_condutor(client, dados)
+            return
+
         if message.topic == TOPICO_RESPOSTA_CONSULTAR_PLACA:
             processar_resposta_veiculo(client, dados)
             return
 
-        if message.topic == TOPICO_RESPOSTA_CONSULTAR_CPF:
-            processar_resposta_condutor(client, dados)
+        if message.topic == TOPICO_RESPOSTA_VEICULOS_POR_CPF:
+            processar_resposta_veiculos_por_cpf(client, dados)
             return
+
+        if message.topic == TOPICO_RESPOSTA_CONSULTAR_CPF:
+            request_id = dados.get("requestId")
+
+            consulta = consultas_pendentes.get(request_id)
+
+            if consulta is None:
+                print(
+                    f"Consulta pendente não encontrada: {request_id}"
+                )
+                return
+
+            # A resposta de consultar-cpf é compartilhada por
+            # dois fluxos diferentes. O tipo identifica qual
+            # operação originou a consulta.
+            if consulta.get("tipo") == "veiculo":
+                processar_resposta_condutor(client, dados)
+                return
+
+            if consulta.get("tipo") == "condutor":
+                processar_resposta_condutor_consulta(
+                    client,
+                    dados,
+                )
+                return
 
     except (
         json.JSONDecodeError,
@@ -303,14 +530,21 @@ def on_message(client, userdata, message):
 
 
 # Cria o cliente MQTT utilizado pelo microserviço.
-client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+client = mqtt.Client(
+    mqtt.CallbackAPIVersion.VERSION2
+)
 
 # Define os callbacks responsáveis pela comunicação MQTT.
 client.on_connect = on_connect
 client.on_message = on_message
 
-# Dentro da rede Docker Compose, "broker" é o nome do serviço Mosquitto.
-client.connect("broker", 1883, 60)
+# Dentro da rede Docker Compose, "broker" é o nome
+# do serviço Mosquitto.
+client.connect(
+    "broker",
+    1883,
+    60,
+)
 
 # Mantém o microserviço executando e processando mensagens.
 client.loop_forever()

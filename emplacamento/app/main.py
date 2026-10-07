@@ -217,7 +217,7 @@ def on_message(client, userdata, message):
                 modelo=dados["modelo"],
                 valor=float(dados["valor"]),
                 cpf_condutor=dados["cpf"],
-                ano_emplacamento=dados["ano_emplacamento"],
+                ano_emplacamento=dados["ano"],
             )
 
             # Salva o veículo no armazenamento do microserviço.
